@@ -1,55 +1,33 @@
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
+# --- HDL & Simulation ---
+*.vcd
+*.ghw
 *.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+vvp_out
+*.vpp
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+# --- Xilinx Vivado (The heavy stuff) ---
+.Xil/
+*.jou
+*.log
+*.pb
+*.str
+*.dir/
+/vivado*
+/webtalk*
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# --- Intel Quartus ---
+db/
+incremental_db/
+output_files/
+*.qws
+*.rpt
+*.summary
 
-# debug information files
-*.dwo
+# --- System ---
+.DS_Store
+Thumbs.db
