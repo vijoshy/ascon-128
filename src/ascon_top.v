@@ -131,4 +131,7 @@ module ascon_top (
     // The spec requires XORing the key into S3 and S4 one last time
     assign tag_out = {perm_s3 ^ key[127:64], perm_s4 ^ key[63:0]};
 
+
+    //next remaining is AD block which i need to finish tomorrow
+
 endmodule
