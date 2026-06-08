@@ -1,10 +1,11 @@
 module permutation_12 (
-    input  clk,
-    input  rst,
-    input  start,
-    input  [63:0] s0, s1, s2, s3, s4,
+    input clk,
+    input rst,
+    input start,
+    input [63:0] s0, s1, s2, s3, s4,
+    input is_6_round,
     output reg [63:0] s0_out, s1_out, s2_out, s3_out, s4_out,
-    output reg        done
+    output reg done
 );
 
     // round constants for p_C
@@ -112,7 +113,7 @@ module permutation_12 (
                 x2     <= s2;
                 x3     <= s3;
                 x4     <= s4;
-                round  <= 4'd0;
+                round  <= is_6_round ? 4'd6:4'd0;
                 active <= 1'b1;
             end
             else if (active) begin
