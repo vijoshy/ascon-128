@@ -19,6 +19,7 @@ Based on a sponge construction than a block cipher. Suggested parameters are as 
 - Verilog-2001 implementation
 - Vivado/XSim simulation support
 
+(this is the 1.2v implementation)
 ---
 
 ## Architecture
