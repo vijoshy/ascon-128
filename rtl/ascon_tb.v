@@ -54,7 +54,7 @@ module ascon_tb;
         $finish;
     end
 
-    // -------------------------------------------------------
+// -------------------------------------------------------
     // 5. Test sequence
     // -------------------------------------------------------
     initial begin
@@ -66,7 +66,7 @@ module ascon_tb;
         ad_last      = 0;
         pt_last      = 0;
         key          = 128'h000102030405060708090A0B0C0D0E0F;
-        nonce        = 128'h101112131415161718191A1B1C1D1E1F;
+        nonce        = 128'h000102030405060708090A0B0C0D0E0F;
         data_in      = 64'h0000000000000000;
 
         // release reset on a clock edge
@@ -74,48 +74,65 @@ module ascon_tb;
         rst = 0;
         @(posedge clk);
 
-// --- PHASE 1: start with flags set ---
-        $display("[%0t] Starting ASCON-128 (Count 37)", $time);
-        
-        has_ad       = 1; 
-        has_pt       = 1; 
-        ad_last      = 1; 
-        pt_last      = 1; 
-        
-        key          = 128'h000102030405060708090A0B0C0D0E0F;
-        nonce        = 128'h101112131415161718191A1B1C1D1E1F;
-        
+    // --- PHASE 1: start with flags set ---
+        $display("[%0t] Starting ASCON-128 init", $time);
+    
+        has_ad  = 1;
+        has_pt  = 1;
+        ad_last = 0;
+        pt_last = 1;
+    
+        // -------------------------------
+        // AD BLOCK #1
+        // 00 01 02 03 04 05 06 07
+        // -------------------------------
+        data_in = 64'h0001020304050607;
+    
         start_cipher = 1;
         @(posedge clk);
         start_cipher = 0;
-
-        // --- PHASE 2: load AD ---
-        wait(uut.controller.start_ad == 1'b1);
-        $display("[%0t] Loading AD block...", $time);
-        
-        // PADDED AD: 303132 + 8000000000
-        data_in = 64'h3031328000000000; 
-
-        // --- PHASE 3: load plaintext ---
-        wait(uut.controller.start_pt == 1'b1);
-        $display("[%0t] Loading PT block...", $time);
-        
-        // PADDED PT: 20 + 80000000000000
-        data_in = 64'h2080000000000000; 
-        
-        // Sample the ciphertext after XOR settles
-        #1; 
-        $display("[%0t] Ciphertext Block : %h", $time, ciphertext_out);
-
-        // --- PHASE 4: wait for completion ---
-        wait(cipher_done == 1'b1);
-        @(posedge clk); 
-
-        $display("[%0t] Final Tag        : %h", $time, tag_out);
-        $display("[%0t] ASCON-128 done", $time);
-
+    
+        wait(uut.controller.start_ad);
+        $display("[%0t] AD Block 1", $time);
+    
+        wait(!uut.controller.start_ad);
+    
+        // -------------------------------
+        // AD BLOCK #2
+        // 08 09 0A 0B 0C 0D 0E 0F
+        // -------------------------------
+        ad_last = 1;
+        data_in = 64'h08090A0B0C0D0E0F;
+    
+        wait(uut.controller.start_ad);
+        $display("[%0t] AD Block 2", $time);
+    
+        wait(!uut.controller.start_ad);
+    
+        // -------------------------------
+        // PLAINTEXT
+        // 00 01 02 03
+        // -------------------------------
+        data_in = 64'h0001020380000000;
+    
+        wait(uut.controller.start_pt);
+        $display("[%0t] PT Block", $time);
+    
+        #1;
+        $display("[%0t] Ciphertext = %h", $time, ciphertext_out);
+    
+        // -------------------------------
+        // FINISH
+        // -------------------------------
+        wait(cipher_done);
+        @(posedge clk);
+    
+        $display("[%0t] Tag = %h", $time, tag_out);
+    
+        $display("Expected Ciphertext = 1EE34125");
+        $display("Expected Tag        = 0AC282B59324053C701FE5D0CF777784");
+    
         #20;
         $finish;
     end
-
 endmodule
