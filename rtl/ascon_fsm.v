@@ -36,14 +36,23 @@ module ascon_fsm (
 
     reg [3:0] state, next_state;
     reg [3:0] prev_state; // FIXED: Added history tracking
+    // FIXED: latches ad_last as it was when the current AD block was loaded.
+    // ST_AD_WAIT decides "was that block the last one" only after the block's
+    // P6 rounds finish, several cycles later - by then the caller has already
+    // moved ad_last/data_in on to the next block (see ascon_tb.v's own
+    // "pre-load onto the wire NOW" pattern), so reading the live signal there
+    // would sample the wrong block's flag.
+    reg       ad_last_latched;
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            state      <= ST_IDLE;
-            prev_state <= ST_IDLE;
+            state           <= ST_IDLE;
+            prev_state      <= ST_IDLE;
+            ad_last_latched <= 1'b0;
         end else begin
             state      <= next_state;
-            prev_state <= state; // FIXED: Record previous state
+            prev_state <= state;
+            if (state == ST_AD_LOAD) ad_last_latched <= ad_last;
         end
     end
 
@@ -57,7 +66,6 @@ module ascon_fsm (
         en_domain_sep    = 1'b0;
         cipher_done      = 1'b0;
         
-        // FIXED: Asserts exactly 1 cycle after INIT_WAIT finishes
         en_post_init_xor = (prev_state == ST_INIT_WAIT); 
 
         case (state)
@@ -88,33 +96,46 @@ module ascon_fsm (
             ST_AD_WAIT: begin
                 is_6_round = 1'b1;
                 if (perm_done) begin
-                    if (!ad_last) next_state = ST_AD_LOAD;
+                    if (!ad_last_latched) next_state = ST_AD_LOAD;
                     else if (has_pt) next_state = ST_PT_LOAD;
                     else next_state = ST_FINAL_LOAD;
                 end
             end
-
             ST_PT_LOAD: begin
                 start_pt   = 1'b1;
-                is_6_round = 1'b1; 
-                en_domain_sep = (ad_last || !has_ad);
-                next_state = ST_PT_WAIT;
-            end
+                // FIXED: domain separation must fire exactly once, on the
+                // first entry into the PT phase, not on every PT block.
+                en_domain_sep = (prev_state == ST_INIT_WAIT) || (prev_state == ST_AD_WAIT);
 
-            ST_PT_WAIT: begin
-                is_6_round = 1'b1;
-                if (perm_done) begin
-                    if (!pt_last) next_state = ST_PT_LOAD;
-                    else next_state = ST_FINAL_LOAD;
+                if (pt_last) begin
+                    is_6_round = 1'b0; // Force 12-rounds for finalization
+                    next_state = ST_FINAL_WAIT; // Jump straight to finalization
+                end else begin
+                    is_6_round = 1'b1; // Standard 6-round PT phase
+                    next_state = ST_PT_WAIT;
                 end
             end
+            
+            ST_PT_WAIT: begin
+                is_6_round = 1'b1;
 
+                // FIXED: the block just completed here is never the last one
+                // (ST_PT_LOAD already diverts straight to ST_FINAL_WAIT for
+                // the last block). The next block - whether or not it's the
+                // final one - must still go through ST_PT_LOAD to be
+                // absorbed; ST_PT_LOAD itself handles the pt_last case.
+                if (perm_done)
+                    next_state = ST_PT_LOAD;
+            end
             ST_FINAL_LOAD: begin
                 start_final = 1'b1;
-                is_6_round  = 1'b0; 
-                if (!has_pt) en_domain_sep = 1'b1;
-                next_state = ST_FINAL_WAIT;
-            end
+                is_6_round  = 1'b0; // 12 rounds for finalization
+                if (!has_pt) begin
+                   en_domain_sep = 1'b1;
+                end
+
+                 next_state = ST_FINAL_WAIT; // FIXED: was self-looping and never advancing
+                 end
 
             ST_FINAL_WAIT: begin
                 if (perm_done) next_state = ST_DONE;
