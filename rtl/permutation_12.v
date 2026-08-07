@@ -23,34 +23,30 @@ module permutation_12 (
     reg [3:0]  round;
     reg        active;
 
-    // -------------------------------------------------------
-    // p_C: XOR round constant into LSB byte of x2
-    // -------------------------------------------------------
+
     wire [63:0] pc_x2 = x2 ^ {56'd0, RC[round]};
 
-    // -------------------------------------------------------
-    // p_S: substitution layer
-    // -------------------------------------------------------
+
     wire [63:0] ps_a0, ps_a1, ps_a2, ps_a3, ps_a4;
     wire [63:0] ps_t0, ps_t1, ps_t2, ps_t3, ps_t4;
     wire [63:0] ps_b0, ps_b1, ps_b2, ps_b3, ps_b4;
     wire [63:0] s_x0,  s_x1,  s_x2,  s_x3,  s_x4;
 
-    // step 1: initial XORs
+    // step 1: initial XORs - pre processing
     assign ps_a0 = x0    ^ x4;
     assign ps_a1 = x1;
     assign ps_a2 = pc_x2 ^ x1;
     assign ps_a3 = x3;
     assign ps_a4 = x4    ^ x3;
 
-    // step 2: AND-NOT terms
+    // step 2: AND-NOT terms the nonlinear stage
     assign ps_t0 = (~ps_a0) & ps_a1;
     assign ps_t1 = (~ps_a1) & ps_a2;
     assign ps_t2 = (~ps_a2) & ps_a3;
     assign ps_t3 = (~ps_a3) & ps_a4;
     assign ps_t4 = (~ps_a4) & ps_a0;
 
-    // step 3: XOR back
+    // step 3: XOR back the mixing stage
     assign ps_b0 = ps_a0 ^ ps_t1;
     assign ps_b1 = ps_a1 ^ ps_t2;
     assign ps_b2 = ps_a2 ^ ps_t3;
