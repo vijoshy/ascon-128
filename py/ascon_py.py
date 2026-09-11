@@ -1,105 +1,185 @@
+"""
+Ascon-AEAD128 golden model -- NIST SP 800-232 (final standard, 2025).
+
+Ported from meichlseder/pyascon (ascon.py), trimmed to the AEAD128 encrypt path
+that the RTL in this folder implements. Little-endian byte order throughout.
+
+This is the reference the Verilog testbench (ascon_tb.v) is checked against.
+Run directly to execute the self-test.
+"""
+
 MASK = (1 << 64) - 1
-def ror(x, n):
+RATE = 16          # bytes (128-bit rate)
+A_ROUNDS = 12      # initialization / finalization
+B_ROUNDS = 8       # associated-data / plaintext processing
+ASCON_AEAD128_IV = 0x00001000808C0001   # LE-loaded IV word (version=1, b=8,a=12, taglen=128, rate=16)
+
+
+def rotr(x, n):
     return ((x >> n) | (x << (64 - n))) & MASK
-RC = [0xf0, 0xe1, 0xd2, 0xc3, 0xb4, 0xa5, 0x96, 0x87, 0x78, 0x69, 0x5a, 0x4b]
-def round_fn(s, C):
-    x0, x1, x2, x3, x4 = s
-    x2 ^= C
-    x0 ^= x4
-    x4 ^= x3
-    x2 ^= x1
-    t0 = x0 ^ ((~x1 & MASK) & x2)
-    t1 = x1 ^ ((~x2 & MASK) & x3)
-    t2 = x2 ^ ((~x3 & MASK) & x4)
-    t3 = x3 ^ ((~x4 & MASK) & x0)
-    t4 = x4 ^ ((~x0 & MASK) & x1)
-    t1 ^= t0
-    t0 ^= t4
-    t3 ^= t2
-    t2 = (~t2) & MASK
-    x0 = (t0 ^ ror(t0, 19) ^ ror(t0, 28)) & MASK
-    x1 = (t1 ^ ror(t1, 61) ^ ror(t1, 39)) & MASK
-    x2 = (t2 ^ ror(t2, 1)  ^ ror(t2, 6))  & MASK
-    x3 = (t3 ^ ror(t3, 10) ^ ror(t3, 17)) & MASK
-    x4 = (t4 ^ ror(t4, 7)  ^ ror(t4, 41)) & MASK
-    return [x0, x1, x2, x3, x4]
-def P12(s):
-    for c in RC:
-        s = round_fn(s, c)
-    return s
-def P6(s):
-    for c in RC[6:]:
-        s = round_fn(s, c)
-    return s
-def loadbytes(b, n):
-    x = 0
-    for i in range(n):
-        x |= b[i] << (56 - 8 * i)
-    return x & MASK
-def storebytes(x, n):
-    return bytes((x >> (56 - 8 * i)) & 0xff for i in range(n))
-def pad(i):
-    return (0x80 << (56 - 8 * i)) & MASK
-DSEP = 0x01 << 56  # SETBYTE(0x01,7) -> byte index7 -> shift 56-8*7=0 ... wait recompute
-def encrypt(key: bytes, nonce: bytes, ad: bytes, pt: bytes, verbose=False):
-    ASCON_128_IV = 0x80400c0600000000
-    K0 = loadbytes(key[0:8], 8)
-    K1 = loadbytes(key[8:16], 8)
-    N0 = loadbytes(nonce[0:8], 8)
-    N1 = loadbytes(nonce[8:16], 8)
-    s = [ASCON_128_IV, K0, K1, N0, N1]
-    if verbose: print("init (pre-P12):", [hex(v) for v in s])
-    s = P12(s)
-    s[3] ^= K0
-    s[4] ^= K1
-    if verbose: print("after init key xor:", [hex(v) for v in s])
-    adlen = len(ad)
-    if adlen:
-        idx = 0
-        while adlen >= 8:
-            s[0] ^= loadbytes(ad[idx:idx+8], 8)
-            s = P6(s)
-            idx += 8
-            adlen -= 8
-        s[0] ^= loadbytes(ad[idx:idx+adlen], adlen)
-        s[0] ^= pad(adlen)
-        s = P6(s)
-        if verbose: print("after AD:", [hex(v) for v in s])
-    # domain separation: SETBYTE(0x01,7) = 0x01 << (56-8*7) = 0x01 << 0
-    s[4] ^= 0x01
-    if verbose: print("after domain sep:", [hex(v) for v in s])
-    mlen = len(pt)
+
+
+def bytes_to_int(b):
+    return int.from_bytes(b, "little")
+
+
+def int_to_bytes(x, n):
+    return int(x).to_bytes(n, "little")
+
+
+def bytes_to_state(b):
+    return [bytes_to_int(b[8 * w:8 * (w + 1)]) for w in range(5)]
+
+
+def permutation(S, rounds):
+    assert rounds <= 12
+    for r in range(12 - rounds, 12):
+        # p_C : round constant into x2 (RC = 0xf0 - 15*r ; r = 0..11 -> f0..4b)
+        S[2] ^= (0xF0 - r * 0x10 + r * 0x01)
+        # p_S : substitution layer
+        S[0] ^= S[4]
+        S[4] ^= S[3]
+        S[2] ^= S[1]
+        T = [(S[i] ^ MASK) & S[(i + 1) % 5] for i in range(5)]
+        for i in range(5):
+            S[i] ^= T[(i + 1) % 5]
+        S[1] ^= S[0]
+        S[0] ^= S[4]
+        S[3] ^= S[2]
+        S[2] ^= MASK
+        # p_L : linear diffusion layer
+        S[0] ^= rotr(S[0], 19) ^ rotr(S[0], 28)
+        S[1] ^= rotr(S[1], 61) ^ rotr(S[1], 39)
+        S[2] ^= rotr(S[2], 1) ^ rotr(S[2], 6)
+        S[3] ^= rotr(S[3], 10) ^ rotr(S[3], 17)
+        S[4] ^= rotr(S[4], 7) ^ rotr(S[4], 41)
+        for i in range(5):
+            S[i] &= MASK
+
+
+def initialize(S, key, nonce):
+    iv = bytes([1, 0, (B_ROUNDS << 4) + A_ROUNDS]) + int_to_bytes(128, 2) + bytes([RATE, 0, 0])
+    assert bytes_to_int(iv) == ASCON_AEAD128_IV, hex(bytes_to_int(iv))
+    S[0], S[1], S[2], S[3], S[4] = bytes_to_state(iv + key + nonce)
+    permutation(S, A_ROUNDS)
+    zk = bytes_to_state(b"\x00" * (40 - len(key)) + key)   # -> [0,0,0,K0,K1]
+    for i in range(5):
+        S[i] ^= zk[i]
+
+
+def process_associated_data(S, ad):
+    if len(ad) > 0:
+        pad = b"\x01" + b"\x00" * (RATE - (len(ad) % RATE) - 1)
+        ad_p = ad + pad
+        for blk in range(0, len(ad_p), RATE):
+            S[0] ^= bytes_to_int(ad_p[blk:blk + 8])
+            S[1] ^= bytes_to_int(ad_p[blk + 8:blk + 16])
+            permutation(S, B_ROUNDS)
+    S[4] ^= 1 << 63          # domain separation (always, even for empty AD)
+
+
+def process_plaintext(S, pt):
+    last = len(pt) % RATE
+    pad = b"\x01" + b"\x00" * (RATE - last - 1)
+    pt_p = pt + pad
     ct = b""
-    idx = 0
-    while mlen >= 8:
-        s[0] ^= loadbytes(pt[idx:idx+8], 8)
-        ct += storebytes(s[0], 8)
-        s = P6(s)
-        idx += 8
-        mlen -= 8
-    s[0] ^= loadbytes(pt[idx:idx+mlen], mlen)
-    ct += storebytes(s[0], mlen)
-    s[0] ^= pad(mlen)
-    if verbose: print("after PT pad:", [hex(v) for v in s])
-    s[1] ^= K0
-    s[2] ^= K1
-    if verbose: print("final key xor 1:", [hex(v) for v in s])
-    s = P12(s)
-    s[3] ^= K0
-    s[4] ^= K1
-    if verbose: print("final key xor 2:", [hex(v) for v in s])
-    tag = storebytes(s[3], 8) + storebytes(s[4], 8)
+    # full blocks (all but the final rate-sized block)
+    for blk in range(0, len(pt_p) - RATE, RATE):
+        S[0] ^= bytes_to_int(pt_p[blk:blk + 8])
+        S[1] ^= bytes_to_int(pt_p[blk + 8:blk + 16])
+        ct += int_to_bytes(S[0], 8) + int_to_bytes(S[1], 8)
+        permutation(S, B_ROUNDS)
+    # final block -- absorb, squeeze, NO permutation
+    blk = len(pt_p) - RATE
+    S[0] ^= bytes_to_int(pt_p[blk:blk + 8])
+    S[1] ^= bytes_to_int(pt_p[blk + 8:blk + 16])
+    ct += (int_to_bytes(S[0], 8)[:min(8, last)] + int_to_bytes(S[1], 8)[:max(0, last - 8)])
+    return ct
+
+
+def finalize(S, key):
+    S[2] ^= bytes_to_int(key[0:8])       # rate//8 + 0 = 2
+    S[3] ^= bytes_to_int(key[8:16])      # rate//8 + 1 = 3
+    permutation(S, A_ROUNDS)
+    S[3] ^= bytes_to_int(key[0:8])
+    S[4] ^= bytes_to_int(key[8:16])
+    return int_to_bytes(S[3], 8) + int_to_bytes(S[4], 8)
+
+
+def encrypt(key, nonce, ad, pt):
+    assert len(key) == 16 and len(nonce) == 16
+    S = [0, 0, 0, 0, 0]
+    initialize(S, key, nonce)
+    process_associated_data(S, ad)
+    ct = process_plaintext(S, pt)
+    tag = finalize(S, key)
     return ct, tag
+
+
+def _pad_blocks(data):
+    """SP 800-232 padding -> list of 16-byte blocks. Always >= 1 block."""
+    pad = b"\x01" + b"\x00" * (RATE - (len(data) % RATE) - 1)
+    d = data + pad
+    return [d[i:i + RATE] for i in range(0, len(d), RATE)]
+
+
+def encrypt_hw(key, nonce, ad, pt):
+    """
+    Block-level view for the Verilog testbench.
+
+    Returns a dict with the padded AD/PT blocks the DUT must be fed, the
+    *untruncated* 16-byte ciphertext blocks the DUT registers per PT block,
+    the real ciphertext byte length, and the tag. All bytes little-endian
+    exactly as loaded into the 64-bit state words.
+    """
+    S = [0, 0, 0, 0, 0]
+    initialize(S, key, nonce)
+
+    ad_blocks = _pad_blocks(ad) if len(ad) > 0 else []
+    for blk in ad_blocks:
+        S[0] ^= bytes_to_int(blk[0:8])
+        S[1] ^= bytes_to_int(blk[8:16])
+        permutation(S, B_ROUNDS)
+    S[4] ^= 1 << 63
+
+    pt_blocks = _pad_blocks(pt)
+    ct_blocks = []
+    for i, blk in enumerate(pt_blocks):
+        S[0] ^= bytes_to_int(blk[0:8])
+        S[1] ^= bytes_to_int(blk[8:16])
+        ct_blocks.append(int_to_bytes(S[0], 8) + int_to_bytes(S[1], 8))
+        if i != len(pt_blocks) - 1:
+            permutation(S, B_ROUNDS)
+
+    S[2] ^= bytes_to_int(key[0:8])
+    S[3] ^= bytes_to_int(key[8:16])
+    permutation(S, A_ROUNDS)
+    S[3] ^= bytes_to_int(key[0:8])
+    S[4] ^= bytes_to_int(key[8:16])
+    tag = int_to_bytes(S[3], 8) + int_to_bytes(S[4], 8)
+
+    return {
+        "ad_blocks": ad_blocks,
+        "pt_blocks": pt_blocks,
+        "ct_blocks": ct_blocks,
+        "ct_len": len(pt),
+        "tag": tag,
+    }
+
+
 if __name__ == "__main__":
-    key = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
-    nonce = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
-    ad = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
-    pt = bytes.fromhex("00010203")
+    key   = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
+    nonce = bytes.fromhex("101112131415161718191A1B1C1D1E1F")
+    ad    = bytes.fromhex("30") 
+    pt    = bytes.fromhex("202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C")  
 
-    ct, tag = encrypt(key, nonce, ad, pt, verbose=True)
+    # Run encryption
+    ct, tag = encrypt(key, nonce, ad, pt)
 
-    print("Ciphertext =", ct.hex().upper())	
-    print("Tag        =", tag.hex().upper())
-
-
+    # Print results for manual verification
+    print("PT:       ", pt.hex().upper())
+    print("CT:       ", ct.hex().upper())
+    print("Tag:      ", tag.hex().upper())
+    print("CT || Tag:", (ct + tag).hex().upper())
+    print("for reference this is count 959");
 
