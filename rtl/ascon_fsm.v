@@ -16,7 +16,7 @@ module ascon_fsm (
     output reg  start_ad,
     output reg  start_pt,
     output reg  start_final,
-    output reg  is_6_round,
+    output reg  rounds_8,
     output reg  en_domain_sep,
     output reg  en_post_init_xor, // FIXED: Added output port
     output reg  cipher_done
@@ -38,7 +38,7 @@ module ascon_fsm (
     reg [3:0] prev_state; // FIXED: Added history tracking
     // FIXED: latches ad_last as it was when the current AD block was loaded.
     // ST_AD_WAIT decides "was that block the last one" only after the block's
-    // P6 rounds finish, several cycles later - by then the caller has already
+    // P8 rounds finish, several cycles later - by then the caller has already
     // moved ad_last/data_in on to the next block (see ascon_tb.v's own
     // "pre-load onto the wire NOW" pattern), so reading the live signal there
     // would sample the wrong block's flag.
@@ -62,7 +62,7 @@ module ascon_fsm (
         start_ad         = 1'b0;
         start_pt         = 1'b0;
         start_final      = 1'b0;
-        is_6_round       = 1'b0;
+        rounds_8       = 1'b0;
         en_domain_sep    = 1'b0;
         cipher_done      = 1'b0;
         
@@ -75,7 +75,7 @@ module ascon_fsm (
 
             ST_INIT_LOAD: begin
                 start_init = 1'b1;
-                is_6_round = 1'b0; 
+                rounds_8 = 1'b0; 
                 next_state = ST_INIT_WAIT;
             end
 
@@ -89,12 +89,12 @@ module ascon_fsm (
 
             ST_AD_LOAD: begin
                 start_ad   = 1'b1;
-                is_6_round = 1'b1; 
+                rounds_8 = 1'b1; 
                 next_state = ST_AD_WAIT;
             end
 
             ST_AD_WAIT: begin
-                is_6_round = 1'b1;
+                rounds_8 = 1'b1;
                 if (perm_done) begin
                     if (!ad_last_latched) next_state = ST_AD_LOAD;
                     else if (has_pt) next_state = ST_PT_LOAD;
@@ -108,16 +108,16 @@ module ascon_fsm (
                 en_domain_sep = (prev_state == ST_INIT_WAIT) || (prev_state == ST_AD_WAIT);
 
                 if (pt_last) begin
-                    is_6_round = 1'b0; // Force 12-rounds for finalization
+                    rounds_8 = 1'b0; // Force 12-rounds for finalization
                     next_state = ST_FINAL_WAIT; // Jump straight to finalization
                 end else begin
-                    is_6_round = 1'b1; // Standard 6-round PT phase
+                    rounds_8 = 1'b1; // Standard P8 PT phase
                     next_state = ST_PT_WAIT;
                 end
             end
             
             ST_PT_WAIT: begin
-                is_6_round = 1'b1;
+                rounds_8 = 1'b1;
 
                 // FIXED: the block just completed here is never the last one
                 // (ST_PT_LOAD already diverts straight to ST_FINAL_WAIT for
@@ -129,7 +129,7 @@ module ascon_fsm (
             end
             ST_FINAL_LOAD: begin
                 start_final = 1'b1;
-                is_6_round  = 1'b0; // 12 rounds for finalization
+                rounds_8  = 1'b0; // 12 rounds for finalization
                 if (!has_pt) begin
                    en_domain_sep = 1'b1;
                 end
