@@ -87,7 +87,7 @@ The top-level RTL module is `ascon_core`.
 
 ## Block Diagram
 
-<img width="2156" height="4625" alt="ascon-aead128 architecture" src="docs/ascon128_fixed_final.jpg" />
+
 
 ---
 
