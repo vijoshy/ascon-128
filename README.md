@@ -1,4 +1,4 @@
-# ascon-128
+# ascon-aead128
 Ascon-AEAD128 is a lightweight authenticated-encryption algorithm standardized by NIST in **SP 800-232 (final, August 2025)**. It uses a 128-bit key, a 128-bit nonce, a 128-bit rate, a 128-bit authentication tag, and a 320-bit internal permutation state.
 
 Ascon-AEAD128 is based on a sponge-like construction rather than a conventional block cipher. The parameters implemented by this repository are:
@@ -54,9 +54,40 @@ The RTL accepts raw, unpadded data blocks. The caller supplies the number of val
 
 ---
 
+## Interface
+
+The top-level RTL module is `ascon_core`.
+
+| Signal | Direction | Width | Description |
+|---|---:|---:|---|
+| `clk` | Input | 1 | Active clock. |
+| `rst` | Input | 1 | Active-high reset. |
+| `start_cipher` | Input | 1 | Starts a new encryption operation. Assert for one cycle while the core is idle. |
+| `has_ad` | Input | 1 | Indicates that associated data is present. |
+| `has_pt` | Input | 1 | Indicates that plaintext is present. The current testbench supplies one final padding block when plaintext is empty. |
+| `ad_last` | Input | 1 | Marks the currently supplied associated-data block as the final AD block. |
+| `pt_last` | Input | 1 | Marks the currently supplied plaintext block as the final plaintext block. |
+| `key` | Input | 128 | 128-bit Ascon key. |
+| `nonce` | Input | 128 | 128-bit unique nonce. Do not reuse a nonce with the same key. |
+| `data_in` | Input | 128 | Raw, unpadded AD or plaintext block. The block is supplied as `{block_word0[127:64], block_word1[63:0]}`. |
+| `data_bytes` | Input | 5 | Number of valid bytes in the final AD or plaintext block, from 0 to 15. Non-final blocks use 16. |
+| `ciphertext_out` | Output | 128 | Ciphertext block produced for the current plaintext block. Only the valid bytes of a partial final block are meaningful. |
+| `tag_out` | Output | 128 | 128-bit authentication tag, available after finalization. |
+| `cipher_done` | Output | 1 | Indicates that the encryption operation has completed and the outputs are valid. |
+
+### Input and block-handling notes
+
+- Inputs must be presented in the byte order expected by the RTL and testbench.
+- The hardware performs 10* padding on final AD and plaintext blocks; callers must not add the padding byte themselves.
+- For an input whose length is an exact multiple of 16 bytes, provide one additional final block with `data_bytes = 0`.
+- For empty plaintext, provide one final all-padding plaintext block with `pt_last = 1` and `data_bytes = 0`.
+- The core is an encryption-only datapath; decryption and tag verification are not currently implemented.
+
+---
+
 ## Block Diagram
 
-<img width="2156" height="4625" alt="ascon128 architecture" src="docs/ascon128_fixed_final.jpg" />
+<img width="2156" height="4625" alt="ascon-aead128 architecture" src="docs/ascon128_fixed_final.jpg" />
 
 ---
 
@@ -96,6 +127,16 @@ The RTL testbench can be run by adding the files in `rtl/` and `tb/ascon_tb.sv` 
 - NIST SP 800-232, *Ascon-Based Lightweight Cryptography Standards for Constrained Devices* (final, August 2025)
 - Official Ascon-AEAD128 specification and Known Answer Tests
 - Ascon permutation specification
+
+---
+
+## Security Disclaimer
+
+This repository is intended for research, education, and hardware-design experimentation. Although the implementation is based on the Ascon-AEAD128 specification, functional verification does not constitute a formal security evaluation.
+
+The RTL has not necessarily been reviewed for side-channel leakage, fault-injection resistance, timing leakage, glitch behavior, fault attacks, key erasure, or other implementation-level security properties. It should not be used to protect sensitive data in production without independent cryptographic review, extensive verification, and appropriate physical-security countermeasures.
+
+Nonce uniqueness is required when using the same key. Never reuse a nonce with the same key. The implementation currently provides encryption and tag generation only; decryption and authentication-tag verification are not included.
 
 ---
 
