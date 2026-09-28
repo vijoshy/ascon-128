@@ -39,6 +39,7 @@ The design is divided into two major blocks:
   - Selects P8/P12 permutations
   - Tracks the final associated-data and plaintext blocks
 
+![Ascon AEAD Block Diagram](docs/ascon_aead128_block_diagram.png)
 ---
 
 - **Datapath**
